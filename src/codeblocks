@@ -1,0 +1,131 @@
+DECLARE
+  v_seq         NUMBER := 25035; -- ✅ tek yerden yönet
+  v_image_base64 CLOB;
+  p_prompt       VARCHAR2(32767);
+  v_request_body CLOB;
+  v_response     CLOB;
+  v_http_code    NUMBER;
+  v_api_key      VARCHAR2(4000) := ''
+  v_model        VARCHAR2(100) := 'gpt-4.1-mini';
+  v_endpoint_url VARCHAR2(500) := 'https://api.openai.com/v1/responses';
+ 
+  v_sig4   VARCHAR2(10);
+  v_mime   VARCHAR2(50);
+  v_len    NUMBER;
+BEGIN
+  p_prompt := 'You are a quality inspection assistant for logistics assets. The image shows a container or a trailer.
+
+Task:
+1) Determine whether there is any nonconformity / defect / damage visible on the container or trailer.
+2) If a seal number is visible, read it. If not visible, set sealnumber to "".
+3) Return ONLY a valid JSON object (no extra text, no markdown). The JSON must match the exact schema below.
+4) Be conservative: set damage/hasnonconformity to true only if there are visible signs.
+5) If something cannot be determined from the image, use null or "" as specified. Do not invent numbers.
+
+Classification guidance:
+- Typical issues: dents, cracks, holes, corrosion/rust, paint scratches, bent frame, broken lights, missing/broken components, door misalignment, damaged corner castings, damaged chassis/landing legs, loose straps, leaks/stains, tire damage, reflective tape missing, severe dirt blocking labels, improper loading/tilt.
+- Severity must be one of: LOW, MEDIUM, HIGH.
+- Face must be one of: UP, DOWN, LEFT, RIGHT, SIDE, FRONT, REAR.
+- Location should be short but specific (e.g. "rear door area", "front right corner casting", "left side panel mid-section", "chassis near landing legs", "roof edge").
+- Additionalremarks should be user-friendly and actionable (short).
+
+Return this exact JSON structure:
+
+{
+"assetseq":1234//will be provided by us
+"sealnumber":"12345"//will be provided by us, should be double checked if possible
+"hasnonconformity":true/false,
+"damage": true/false,
+"location":"some area",
+"severity":"MEDIUM",
+"additionalremarks":"some AI remarks that we are going to show to the user",
+"nonconformity":{
+"type":"DAMAGE",
+"risk":"LOW",
+"face":"SIDE" (UP, DOWN, RIGHT LEFT or SIDE maybe?)
+}
+}';
+ 
+  -- 1) BLOB length kontrolü (boşsa base64 boş olur)
+  SELECT DBMS_LOB.getlength(blobcontent)
+  INTO   v_len
+  FROM   cemtezgelen.documents
+  WHERE  seq = 1;
+ 
+  IF v_len IS NULL OR v_len = 0 THEN
+    RAISE_APPLICATION_ERROR(-20051, 'Blobcontent is empty for seq='||v_seq);
+  END IF;
+ 
+  -- 2) Magic bytes + mime tespiti (aynı seq!)
+  SELECT UTL_RAW.CAST_TO_VARCHAR2(DBMS_LOB.SUBSTR(blobcontent, 4, 1))
+  INTO   v_sig4
+  FROM  cemtezgelen.documents
+  WHERE  seq = 1;
+ 
+  IF v_sig4 LIKE '%PDF%' THEN
+    RAISE_APPLICATION_ERROR(-20050, 'Bu dosya PDF; image olarak gönderilemez. seq='||v_seq);
+  ELSIF v_sig4 LIKE '%GIF%' THEN
+    v_mime := 'image/gif';
+  ELSIF v_sig4 LIKE '%PNG%' THEN
+    v_mime := 'image/png';
+  ELSE
+    v_mime := 'image/jpeg';
+  END IF;
+ 
+  -- 3) Base64 al (aynı seq!)
+  SELECT apex_web_service.blob2clobbase64(blobcontent)
+  INTO   v_image_base64
+  FROM   cemtezgelen.documents
+  WHERE  seq = 1;
+ 
+  v_image_base64 := REPLACE(REPLACE(v_image_base64, CHR(10), ''), CHR(13), '');
+ 
+  IF v_image_base64 IS NULL OR DBMS_LOB.getlength(v_image_base64) = 0 THEN
+    RAISE_APPLICATION_ERROR(-20052, 'Base64 is empty after conversion. seq='||v_seq);
+  END IF;
+ 
+  DBMS_OUTPUT.PUT_LINE('mime='||v_mime);
+  DBMS_OUTPUT.PUT_LINE('blob_len='||v_len);
+  DBMS_OUTPUT.PUT_LINE('b64_len='||DBMS_LOB.getlength(v_image_base64));
+  DBMS_OUTPUT.PUT_LINE('b64_head='||DBMS_LOB.SUBSTR(v_image_base64, 12, 1));
+ 
+  -- 4) Request: v_mime kullan
+  v_request_body :=
+    '{'||
+    '"model":"'||v_model||'",'||
+    '"input":[{'||
+    ' "role":"user",'||
+    ' "content":['||
+    '   {"type":"input_text","text":"'||
+          REPLACE(REPLACE(REPLACE(p_prompt,'\','\\'),'"','\"'),CHR(10),'\n') ||
+    '"},'||
+    '   {"type":"input_image","image_url":"data:'||v_mime||';base64,'||
+          v_image_base64 ||
+    '","detail":"auto"}'||
+    ' ]'||
+    '}],'||
+    '"max_output_tokens":500'||
+    '}';
+ 
+  v_response := XXsd_CONNECT.PKG_HTTP.f_post(
+    p_endpointURL          => v_endpoint_url,
+    p_body                 => v_request_body,
+    p_dataType             => 'JSON',
+    p_endpointAPIkey       => 'Bearer ' || v_api_key,
+    p_jsonHeaderData       => '{"Authorization":"Bearer '|| v_api_key ||'","Content-Type":"application/json"}',
+    p_set_transfer_timeout => 60,
+    p_responsehttpcode     => v_http_code
+  );
+ 
+  DBMS_OUTPUT.PUT_LINE('HTTP='||v_http_code);
+  DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_response,1000,1));
+ 
+  IF v_http_code != 200 THEN
+    RAISE_APPLICATION_ERROR(
+      -20002,
+      'OpenAI HTTP '||v_http_code||' - '||
+      NVL(JSON_VALUE(v_response,'$.error.message'), DBMS_LOB.SUBSTR(v_response,300,1))
+    );
+  END IF;
+END;
+/
