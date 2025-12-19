@@ -108,7 +108,10 @@ hackathon-group3/
 └── src/
     └── database/
         └── cemtezgelen/
-            └── hackathon_ai_check_ddl.sql   # Complete data model
+            ├── hackathon_ai_check_ddl.sql     # Complete data model
+            ├── pkg_hackathon_demo.pks         # Demo package spec
+            ├── pkg_hackathon_demo.pkb         # Demo package body
+            └── demo_data_usage.sql            # Usage examples
 ```
 
 ## 📝 Getting Started
@@ -122,42 +125,100 @@ hackathon-group3/
 
 1. **Create Database Objects:**
 ```sql
+-- Create tables, views, triggers, indexes
 @src/database/cemtezgelen/hackathon_ai_check_ddl.sql
 ```
 
-2. **Load Demo Data:**
-(Coming soon - demo data package)
+2. **Install Demo Package:**
+```sql
+-- Install demo data generation package
+@src/database/cemtezgelen/pkg_hackathon_demo.pks
+@src/database/cemtezgelen/pkg_hackathon_demo.pkb
+```
 
-3. **Configure APEX App:**
+3. **Generate Demo Data:**
+```sql
+-- Enable output to see progress
+SET SERVEROUTPUT ON SIZE UNLIMITED;
+
+-- Reset and generate fresh demo data
+EXEC cemtezgelen.pkg_hackathon_demo.p_reset_demo_data;
+EXEC cemtezgelen.pkg_hackathon_demo.p_generate_demo_data(p_provisionerseq => 1);
+
+-- View summary
+EXEC cemtezgelen.pkg_hackathon_demo.p_print_demo_summary(p_provisionerseq => 1);
+```
+
+4. **Configure APEX App:**
 - Import APEX application (App ID: 135)
 - Configure AI API endpoints
 - Set up notification channels
 
+### Quick Start
+
+Run all setup commands at once:
+```sql
+@src/database/cemtezgelen/demo_data_usage.sql
+```
+
 ## 🎨 Demo Scenarios
 
-### Scenario 1: Successful Delivery
-- Driver delivers container intact
-- Uploads signature and photo
-- AI validates → ✅ PASSED
-- No notifications
+Demo package creates 5 realistic scenarios with complete data:
 
-### Scenario 2: Damage Detected
-- Driver reports DAMAGED non-conformity
-- Uploads damage photo
-- AI validates → ✅ PASSED (damage matches report)
-- INFO notification to backoffice
+### Scenario 1: Normal Delivery (Happy Path) ✅
+- **Order:** ORD-2025-001 (Logistics Solutions GmbH)
+- **Route:** Rotterdam → Hamburg
+- **Assets:** 2 x 20ft containers
+- **Driver:** Jan van Dijk
+- **Status:** Clean delivery, no issues
+- **Use Case:** Baseline for successful delivery workflow
 
-### Scenario 3: Mismatch Detected
-- Driver reports DAMAGED
-- Uploads photo showing different issue
-- AI validates → ❌ FAILED (mismatch detected)
-- 🚨 URGENT notification to backoffice
+### Scenario 2: Damaged Container ⚠️
+- **Order:** ORD-2025-002 (BelgianTrade BVBA)
+- **Route:** Antwerp delivery
+- **Asset:** MAEU2345678 (40ft container)
+- **Driver:** Marc Janssen
+- **Issue:** Front-left corner impact damage (HIGH severity)
+- **Non-conformity:** DAMAGED with detailed description
+- **Use Case:** AI validates damage photo matches reported issue
 
-### Scenario 4: Missing Documents
-- Driver attempts to mark as delivered
-- No POD signature uploaded
-- AI validates → ⚠️ WARNING
-- Driver prompted to upload missing document
+### Scenario 3: Seal Broken 🚨
+- **Order:** ORD-2025-003 (SecureFreight Ltd)
+- **Route:** Southampton inspection
+- **Asset:** CSNU3456789 (High security container)
+- **Driver:** Thomas Brown
+- **Issue:** Security seal tampering (CRITICAL severity)
+- **Non-conformity:** SEAL_BROKEN - escalated status
+- **Use Case:** Security breach detection and immediate escalation
+
+### Scenario 4: Missing Asset 📦
+- **Order:** ORD-2025-004 (Nordic Shipping AS)
+- **Route:** Oslo pickup
+- **Assets:** 2 trailers (1 missing)
+- **Driver:** Erik Andersen
+- **Issue:** TRLR-001234 not found at pickup location
+- **Non-conformity:** MISSING (HIGH severity)
+- **Use Case:** Asset tracking failure and investigation workflow
+
+### Scenario 5: Temperature Issue ❄️
+- **Order:** ORD-2025-005 (FreshFood International)
+- **Route:** Le Havre delivery
+- **Asset:** REEFER-567890 (40ft refrigerated)
+- **Driver:** François Martin
+- **Issue:** Temperature -8°C (target: -18°C) - CRITICAL
+- **Non-conformity:** TEMPERATURE_ISSUE - cold chain compromised
+- **Use Case:** Real-time temperature monitoring and urgent response
+
+### Generated Data Summary
+
+After running `p_generate_demo_data`:
+- **5 Orders** across different countries (DE, BE, UK, NO, FR)
+- **5 Trips** with unique drivers and vehicles
+- **7 Stops** (pickup/delivery/inspection)
+- **7 Assets** (5 containers + 2 trailers)
+- **4 Non-conformities** (various severity levels)
+- **Realistic GPS coordinates** and addresses
+- **Complete audit trail** with timestamps
 
 ## 📈 Success Metrics
 
