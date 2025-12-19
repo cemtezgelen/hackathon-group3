@@ -19,11 +19,9 @@ AS
     DELETE FROM cemtezgelen.aichecks;
     DELETE FROM cemtezgelen.documents;
     DELETE FROM cemtezgelen.nonconformities;
-    DELETE FROM cemtezgelen.stopassets;
+    DELETE FROM cemtezgelen.assets;
     DELETE FROM cemtezgelen.stops;
     DELETE FROM cemtezgelen.trips;
-    DELETE FROM cemtezgelen.assets;
-    DELETE FROM cemtezgelen.orders;
     
     COMMIT;
     
@@ -48,11 +46,9 @@ AS
     p_provisionerseq in number
   )
   AS
-    v_order_seq        NUMBER;
     v_trip_seq         NUMBER;
     v_stop_seq         NUMBER;
     v_asset_seq        NUMBER;
-    v_stopasset_seq    NUMBER;
     v_nonconf_seq      NUMBER;
     v_counter          NUMBER := 0;
   BEGIN

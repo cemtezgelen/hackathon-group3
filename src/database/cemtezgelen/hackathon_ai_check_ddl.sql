@@ -1,93 +1,18 @@
 -- =============================================================================
--- Hackathon AI-Document Check - Data Model v2.0
+-- Hackathon AI-Document Check - Data Model v3.0
 -- Schema: cemtezgelen
 -- Purpose: Track 5 - AI Integration for cargo/asset damage and document check
--- Changes: Non-conformities in separate table, Assets (containers/trailers)
--- AI generated code START - 2025-12-19 14:45
+-- Changes: Removed ORDERS and STOPASSETS tables, simplified to TRIPS -> STOPS -> ASSETS
+-- AI generated code START - 2025-12-19 16:00
 -- =============================================================================
 
 -- =============================================================================
--- 1. ORDERS TABLE (Siparişler)
--- =============================================================================
-CREATE SEQUENCE cemtezgelen.orders_seq START WITH 1 INCREMENT BY 1 NOCACHE;
-
-CREATE TABLE cemtezgelen.orders (
-  seq                  NUMBER,
-  ordernumber          VARCHAR2(50 CHAR) NOT NULL,
-  customername         VARCHAR2(200 CHAR),
-  customercode         VARCHAR2(50 CHAR),
-  contactperson        VARCHAR2(200 CHAR),
-  contactphone         VARCHAR2(50 CHAR),
-  contactemail         VARCHAR2(200 CHAR),
-  deliveryaddress      VARCHAR2(500 CHAR),
-  deliveryinstructions VARCHAR2(4000 CHAR),
-  orderdate            TIMESTAMP(6) WITH LOCAL TIME ZONE,
-  requesteddate        TIMESTAMP(6) WITH LOCAL TIME ZONE,
-  priority             VARCHAR2(20 CHAR) DEFAULT 'NORMAL', -- LOW, NORMAL, HIGH, URGENT
-  status               VARCHAR2(20 CHAR) DEFAULT 'NEW', -- NEW, PROCESSING, COMPLETED, CANCELLED
-  totalnumberofassets  NUMBER,
-  totalweight          NUMBER,
-  notes                VARCHAR2(4000 CHAR),
-  -- Audit columns
-  createdate           TIMESTAMP(6) WITH LOCAL TIME ZONE DEFAULT ON NULL CURRENT_TIMESTAMP,
-  createuser           VARCHAR2(200 CHAR),
-  create_timezone      VARCHAR2(50 CHAR) DEFAULT ON NULL SESSIONTIMEZONE,
-  updatedate           TIMESTAMP(6) WITH LOCAL TIME ZONE,
-  updateuser           VARCHAR2(200 CHAR),
-  update_timezone      VARCHAR2(50 CHAR),
-  provisionerseq       NUMBER,
-  CONSTRAINT orders_seq_pk PRIMARY KEY (seq),
-  CONSTRAINT orders_ordernumber_uk UNIQUE (ordernumber, provisionerseq),
-  CONSTRAINT orders_status_ck CHECK (status IN ('NEW', 'PROCESSING', 'COMPLETED', 'CANCELLED')),
-  CONSTRAINT orders_priority_ck CHECK (priority IN ('LOW', 'NORMAL', 'HIGH', 'URGENT'))
-);
-
-COMMENT ON TABLE cemtezgelen.orders IS 'Hackathon - Order master data with customer and delivery details';
-COMMENT ON COLUMN cemtezgelen.orders.priority IS 'Order priority: LOW, NORMAL, HIGH, URGENT';
-COMMENT ON COLUMN cemtezgelen.orders.status IS 'Order status: NEW, PROCESSING, COMPLETED, CANCELLED';
-
-CREATE INDEX cemtezgelen.idx_orders_1 ON cemtezgelen.orders(provisionerseq, status);
-CREATE INDEX cemtezgelen.idx_orders_2 ON cemtezgelen.orders(orderdate);
-CREATE INDEX cemtezgelen.idx_orders_3 ON cemtezgelen.orders(customercode);
-CREATE INDEX cemtezgelen.idx_orders_4 ON cemtezgelen.orders(priority, status);
-
-CREATE OR REPLACE VIEW cemtezgelen.v_orders AS
-SELECT * FROM cemtezgelen.orders
-WHERE provisionerseq = NVL(SYS_CONTEXT('APEX$SESSION', 'PROVISIONERSEQ'), xxsd_admin.pkg_util.get_context_value('PROVISIONERSEQ'));
-
-CREATE OR REPLACE TRIGGER cemtezgelen.orders_bir
-BEFORE INSERT OR UPDATE ON cemtezgelen.orders
-FOR EACH ROW
-BEGIN
-  IF INSERTING THEN
-    :new.seq := NVL(:new.seq, cemtezgelen.orders_seq.NEXTVAL);
-    :new.createuser := NVL(:new.createuser, SYS_CONTEXT('APEX$SESSION', 'APP_USER'));
-    :new.createdate := NVL(:new.createdate, CURRENT_TIMESTAMP);
-    :new.create_timezone := NVL(:new.create_timezone, SESSIONTIMEZONE);
-  END IF;
-  
-  IF UPDATING THEN
-    IF NOT UPDATING('updatedate') THEN
-      :new.updatedate := CURRENT_TIMESTAMP;
-    END IF;
-    IF NOT UPDATING('updateuser') THEN
-      :new.updateuser := SYS_CONTEXT('APEX$SESSION', 'APP_USER');
-    END IF;
-    IF NOT UPDATING('update_timezone') THEN
-      :new.update_timezone := SESSIONTIMEZONE;
-    END IF;
-  END IF;
-END;
-/
-
--- =============================================================================
--- 2. TRIPS TABLE (Sürüşler)
+-- 1. TRIPS TABLE (Sürüşler)
 -- =============================================================================
 CREATE SEQUENCE cemtezgelen.trips_seq START WITH 1 INCREMENT BY 1 NOCACHE;
 
 CREATE TABLE cemtezgelen.trips (
   seq                  NUMBER,
-  orderseq             NUMBER NOT NULL,
   tripnumber           VARCHAR2(50 CHAR) NOT NULL,
   drivername           VARCHAR2(200 CHAR),
   driverphone          VARCHAR2(50 CHAR),
@@ -114,7 +39,6 @@ CREATE TABLE cemtezgelen.trips (
   update_timezone      VARCHAR2(50 CHAR),
   provisionerseq       NUMBER,
   CONSTRAINT trips_seq_pk PRIMARY KEY (seq),
-  CONSTRAINT trips_orderseq_fk FOREIGN KEY (orderseq) REFERENCES cemtezgelen.orders(seq),
   CONSTRAINT trips_tripnumber_uk UNIQUE (tripnumber, provisionerseq),
   CONSTRAINT trips_status_ck CHECK (status IN ('PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'))
 );
@@ -125,9 +49,8 @@ COMMENT ON COLUMN cemtezgelen.trips.estimatedduration IS 'Estimated duration in 
 COMMENT ON COLUMN cemtezgelen.trips.actualduration IS 'Actual duration in minutes';
 
 CREATE INDEX cemtezgelen.idx_trips_1 ON cemtezgelen.trips(provisionerseq, status);
-CREATE INDEX cemtezgelen.idx_trips_2 ON cemtezgelen.trips(orderseq);
-CREATE INDEX cemtezgelen.idx_trips_3 ON cemtezgelen.trips(tripdate);
-CREATE INDEX cemtezgelen.idx_trips_4 ON cemtezgelen.trips(drivername);
+CREATE INDEX cemtezgelen.idx_trips_2 ON cemtezgelen.trips(tripdate);
+CREATE INDEX cemtezgelen.idx_trips_3 ON cemtezgelen.trips(drivername);
 
 CREATE OR REPLACE VIEW cemtezgelen.v_trips AS
 SELECT * FROM cemtezgelen.trips
@@ -236,13 +159,13 @@ END;
 /
 
 -- =============================================================================
--- 4. ASSETS TABLE (Containers & Trailers)
+-- 3. ASSETS TABLE (Containers & Trailers)
 -- =============================================================================
 CREATE SEQUENCE cemtezgelen.assets_seq START WITH 1 INCREMENT BY 1 NOCACHE;
 
 CREATE TABLE cemtezgelen.assets (
   seq                  NUMBER,
-  orderseq             NUMBER NOT NULL,
+  stopseq              NUMBER NOT NULL,
   assettype            VARCHAR2(20 CHAR) NOT NULL, -- CONTAINER, TRAILER
   assetnumber          VARCHAR2(50 CHAR) NOT NULL,
   description          VARCHAR2(500 CHAR),
@@ -263,7 +186,19 @@ CREATE TABLE cemtezgelen.assets (
   sealnumber           VARCHAR2(50 CHAR),
   barcode              VARCHAR2(100 CHAR),
   rfidtag              VARCHAR2(100 CHAR),
+  deliverystatus       VARCHAR2(20 CHAR) DEFAULT 'PENDING', -- PENDING, DELIVERED, REJECTED, PARTIAL
+  expectedquantity     NUMBER DEFAULT 1,
+  actualquantity       NUMBER,
+  inspectionstatus     VARCHAR2(20 CHAR), -- NOT_INSPECTED, PASSED, FAILED, PENDING_REVIEW
+  inspectedby          VARCHAR2(200 CHAR),
+  inspectiondate       TIMESTAMP(6) WITH LOCAL TIME ZONE,
+  inspectionnotes      VARCHAR2(4000 CHAR),
+  delivereddate        TIMESTAMP(6) WITH LOCAL TIME ZONE,
+  deliveredby          VARCHAR2(200 CHAR),
+  recipientname        VARCHAR2(200 CHAR),
+  recipientsignature    VARCHAR2(500 CHAR), -- file path
   notes                VARCHAR2(4000 CHAR),
+  blobcontent          BLOB,
   -- Audit columns
   createdate           TIMESTAMP(6) WITH LOCAL TIME ZONE DEFAULT ON NULL CURRENT_TIMESTAMP,
   createuser           VARCHAR2(200 CHAR),
@@ -273,25 +208,31 @@ CREATE TABLE cemtezgelen.assets (
   update_timezone      VARCHAR2(50 CHAR),
   provisionerseq       NUMBER,
   CONSTRAINT assets_seq_pk PRIMARY KEY (seq),
-  CONSTRAINT assets_orderseq_fk FOREIGN KEY (orderseq) REFERENCES cemtezgelen.orders(seq),
-  CONSTRAINT assets_assetnumber_uk UNIQUE (assetnumber, orderseq, provisionerseq),
+  CONSTRAINT assets_stopseq_fk FOREIGN KEY (stopseq) REFERENCES cemtezgelen.stops(seq),
+  CONSTRAINT assets_assetnumber_uk UNIQUE (assetnumber, stopseq, provisionerseq),
   CONSTRAINT assets_assettype_ck CHECK (assettype IN ('CONTAINER', 'TRAILER')),
   CONSTRAINT assets_condition_ck CHECK (condition IN ('GOOD', 'FAIR', 'DAMAGED', 'CRITICAL')),
   CONSTRAINT assets_isrefrigerated_ck CHECK (isrefrigerated IN ('Y', 'N')),
-  CONSTRAINT assets_ishazardous_ck CHECK (ishazardous IN ('Y', 'N'))
+  CONSTRAINT assets_ishazardous_ck CHECK (ishazardous IN ('Y', 'N')),
+  CONSTRAINT assets_delstatus_ck CHECK (deliverystatus IN ('PENDING', 'DELIVERED', 'REJECTED', 'PARTIAL')),
+  CONSTRAINT assets_inspstatus_ck CHECK (inspectionstatus IN ('NOT_INSPECTED', 'PASSED', 'FAILED', 'PENDING_REVIEW'))
 );
 
-COMMENT ON TABLE cemtezgelen.assets IS 'Hackathon - Assets (containers and trailers) with detailed specifications';
+COMMENT ON TABLE cemtezgelen.assets IS 'Hackathon - Assets (containers and trailers) with detailed specifications and delivery tracking';
 COMMENT ON COLUMN cemtezgelen.assets.assettype IS 'Asset type: CONTAINER, TRAILER';
 COMMENT ON COLUMN cemtezgelen.assets.condition IS 'Asset condition: GOOD, FAIR, DAMAGED, CRITICAL';
 COMMENT ON COLUMN cemtezgelen.assets.isrefrigerated IS 'Refrigerated asset flag: Y=Yes, N=No';
 COMMENT ON COLUMN cemtezgelen.assets.ishazardous IS 'Contains hazardous materials: Y=Yes, N=No';
+COMMENT ON COLUMN cemtezgelen.assets.deliverystatus IS 'Delivery status: PENDING, DELIVERED, REJECTED, PARTIAL';
+COMMENT ON COLUMN cemtezgelen.assets.inspectionstatus IS 'Inspection status: NOT_INSPECTED, PASSED, FAILED, PENDING_REVIEW';
 
 CREATE INDEX cemtezgelen.idx_assets_1 ON cemtezgelen.assets(provisionerseq);
-CREATE INDEX cemtezgelen.idx_assets_2 ON cemtezgelen.assets(orderseq);
+CREATE INDEX cemtezgelen.idx_assets_2 ON cemtezgelen.assets(stopseq);
 CREATE INDEX cemtezgelen.idx_assets_3 ON cemtezgelen.assets(assettype);
 CREATE INDEX cemtezgelen.idx_assets_4 ON cemtezgelen.assets(condition);
 CREATE INDEX cemtezgelen.idx_assets_5 ON cemtezgelen.assets(assetnumber);
+CREATE INDEX cemtezgelen.idx_assets_6 ON cemtezgelen.assets(deliverystatus);
+CREATE INDEX cemtezgelen.idx_assets_7 ON cemtezgelen.assets(inspectionstatus);
 
 CREATE OR REPLACE VIEW cemtezgelen.v_assets AS
 SELECT * FROM cemtezgelen.assets
@@ -323,87 +264,13 @@ END;
 /
 
 -- =============================================================================
--- 5. STOP_ASSETS TABLE (Duraklara Atanmış Asset'ler)
--- =============================================================================
-CREATE SEQUENCE cemtezgelen.stopassets_seq START WITH 1 INCREMENT BY 1 NOCACHE;
-
-CREATE TABLE cemtezgelen.stopassets (
-  seq                    NUMBER,
-  stopseq                NUMBER NOT NULL,
-  assetseq               NUMBER NOT NULL,
-  deliverystatus         VARCHAR2(20 CHAR) DEFAULT 'PENDING', -- PENDING, DELIVERED, REJECTED, PARTIAL
-  expectedquantity       NUMBER DEFAULT 1,
-  actualquantity         NUMBER,
-  inspectionstatus       VARCHAR2(20 CHAR), -- NOT_INSPECTED, PASSED, FAILED, PENDING_REVIEW
-  inspectedby            VARCHAR2(200 CHAR),
-  inspectiondate         TIMESTAMP(6) WITH LOCAL TIME ZONE,
-  inspectionnotes        VARCHAR2(4000 CHAR),
-  delivereddate          TIMESTAMP(6) WITH LOCAL TIME ZONE,
-  deliveredby            VARCHAR2(200 CHAR),
-  recipientname          VARCHAR2(200 CHAR),
-  recipientsignature     VARCHAR2(500 CHAR), -- file path
-  notes                  VARCHAR2(4000 CHAR),
-  -- Audit columns
-  createdate             TIMESTAMP(6) WITH LOCAL TIME ZONE DEFAULT ON NULL CURRENT_TIMESTAMP,
-  createuser             VARCHAR2(200 CHAR),
-  create_timezone        VARCHAR2(10 CHAR) DEFAULT ON NULL SESSIONTIMEZONE,
-  updatedate             TIMESTAMP(6) WITH LOCAL TIME ZONE,
-  updateuser             VARCHAR2(200 CHAR),
-  update_timezone        VARCHAR2(10 CHAR),
-  provisionerseq         NUMBER,
-  CONSTRAINT stopassets_seq_pk PRIMARY KEY (seq),
-  CONSTRAINT stopassets_stopseq_fk FOREIGN KEY (stopseq) REFERENCES cemtezgelen.stops(seq),
-  CONSTRAINT stopassets_assetseq_fk FOREIGN KEY (assetseq) REFERENCES cemtezgelen.assets(seq),
-  CONSTRAINT stopassets_delstatus_ck CHECK (deliverystatus IN ('PENDING', 'DELIVERED', 'REJECTED', 'PARTIAL')),
-  CONSTRAINT stopassets_inspstatus_ck CHECK (inspectionstatus IN ('NOT_INSPECTED', 'PASSED', 'FAILED', 'PENDING_REVIEW'))
-);
-
-COMMENT ON TABLE cemtezgelen.stopassets IS 'Hackathon - Assets assigned to stops with delivery and inspection status';
-COMMENT ON COLUMN cemtezgelen.stopassets.deliverystatus IS 'Delivery status: PENDING, DELIVERED, REJECTED, PARTIAL';
-COMMENT ON COLUMN cemtezgelen.stopassets.inspectionstatus IS 'Inspection status: NOT_INSPECTED, PASSED, FAILED, PENDING_REVIEW';
-
-CREATE INDEX cemtezgelen.idx_stopassets_1 ON cemtezgelen.stopassets(provisionerseq, deliverystatus);
-CREATE INDEX cemtezgelen.idx_stopassets_2 ON cemtezgelen.stopassets(stopseq);
-CREATE INDEX cemtezgelen.idx_stopassets_3 ON cemtezgelen.stopassets(assetseq);
-CREATE INDEX cemtezgelen.idx_stopassets_4 ON cemtezgelen.stopassets(inspectionstatus);
-
-CREATE OR REPLACE VIEW cemtezgelen.v_stopassets AS
-SELECT * FROM cemtezgelen.stopassets
-WHERE provisionerseq = NVL(SYS_CONTEXT('APEX$SESSION', 'PROVISIONERSEQ'), xxsd_admin.pkg_util.get_context_value('PROVISIONERSEQ'));
-
-CREATE OR REPLACE TRIGGER cemtezgelen.stopassets_bir
-BEFORE INSERT OR UPDATE ON cemtezgelen.stopassets
-FOR EACH ROW
-BEGIN
-  IF INSERTING THEN
-    :new.seq := NVL(:new.seq, cemtezgelen.stopassets_seq.NEXTVAL);
-    :new.createuser := NVL(:new.createuser, SYS_CONTEXT('APEX$SESSION', 'APP_USER'));
-    :new.createdate := NVL(:new.createdate, CURRENT_TIMESTAMP);
-    :new.create_timezone := NVL(:new.create_timezone, SESSIONTIMEZONE);
-  END IF;
-  
-  IF UPDATING THEN
-    IF NOT UPDATING('updatedate') THEN
-      :new.updatedate := CURRENT_TIMESTAMP;
-    END IF;
-    IF NOT UPDATING('updateuser') THEN
-      :new.updateuser := SYS_CONTEXT('APEX$SESSION', 'APP_USER');
-    END IF;
-    IF NOT UPDATING('update_timezone') THEN
-      :new.update_timezone := SESSIONTIMEZONE;
-    END IF;
-  END IF;
-END;
-/
-
--- =============================================================================
--- 6. NONCONFORMITIES TABLE (Non-Conformity Main Table)
+-- 4. NONCONFORMITIES TABLE (Non-Conformity Main Table)
 -- =============================================================================
 CREATE SEQUENCE cemtezgelen.nonconformities_seq START WITH 1 INCREMENT BY 1 NOCACHE;
 
 CREATE TABLE cemtezgelen.nonconformities (
   seq                    NUMBER,
-  stopassetseq           NUMBER NOT NULL,
+  assetseq               NUMBER NOT NULL,
   nonconformitynumber    VARCHAR2(50 CHAR),
   nonconformitytype      VARCHAR2(50 CHAR) NOT NULL, -- DAMAGED, MISSING, WRONG_QUANTITY, SEAL_BROKEN, TEMPERATURE_ISSUE, CONTAMINATION, OTHER
   severity               VARCHAR2(20 CHAR) DEFAULT 'MEDIUM', -- LOW, MEDIUM, HIGH, CRITICAL
@@ -432,7 +299,7 @@ CREATE TABLE cemtezgelen.nonconformities (
   update_timezone        VARCHAR2(10 CHAR),
   provisionerseq         NUMBER,
   CONSTRAINT nonconformities_seq_pk PRIMARY KEY (seq),
-  CONSTRAINT nonconformities_stopasset_fk FOREIGN KEY (stopassetseq) REFERENCES cemtezgelen.stopassets(seq),
+  CONSTRAINT nonconformities_assetseq_fk FOREIGN KEY (assetseq) REFERENCES cemtezgelen.assets(seq),
   CONSTRAINT nonconformities_number_uk UNIQUE (nonconformitynumber, provisionerseq),
   CONSTRAINT nonconformities_type_ck CHECK (nonconformitytype IN ('DAMAGED', 'MISSING', 'WRONG_QUANTITY', 'SEAL_BROKEN', 'TEMPERATURE_ISSUE', 'CONTAMINATION', 'OTHER')),
   CONSTRAINT nonconformities_severity_ck CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
@@ -445,7 +312,7 @@ COMMENT ON COLUMN cemtezgelen.nonconformities.severity IS 'Severity level: LOW, 
 COMMENT ON COLUMN cemtezgelen.nonconformities.resolutionstatus IS 'Resolution status: OPEN, IN_REVIEW, RESOLVED, REJECTED, ESCALATED';
 
 CREATE INDEX cemtezgelen.idx_nonconformities_1 ON cemtezgelen.nonconformities(provisionerseq, resolutionstatus);
-CREATE INDEX cemtezgelen.idx_nonconformities_2 ON cemtezgelen.nonconformities(stopassetseq);
+CREATE INDEX cemtezgelen.idx_nonconformities_2 ON cemtezgelen.nonconformities(assetseq);
 CREATE INDEX cemtezgelen.idx_nonconformities_3 ON cemtezgelen.nonconformities(nonconformitytype);
 CREATE INDEX cemtezgelen.idx_nonconformities_4 ON cemtezgelen.nonconformities(severity);
 CREATE INDEX cemtezgelen.idx_nonconformities_5 ON cemtezgelen.nonconformities(reporteddate);
@@ -485,14 +352,14 @@ END;
 /
 
 -- =============================================================================
--- 7. DOCUMENTS TABLE (Dökümanlar)
+-- 5. DOCUMENTS TABLE (Dökümanlar)
 -- =============================================================================
 CREATE SEQUENCE cemtezgelen.documents_seq START WITH 1 INCREMENT BY 1 NOCACHE;
 
 CREATE TABLE cemtezgelen.documents (
   seq                  NUMBER,
   stopseq              NUMBER,
-  stopassetseq         NUMBER,
+  assetseq             NUMBER,
   nonconformityseq     NUMBER,
   documenttype         VARCHAR2(50 CHAR), -- PHOTO, SIGNATURE, POD, DAMAGE_PHOTO, INSPECTION_PHOTO, SEAL_PHOTO, CMR, INVOICE, OTHER
   documentcategory     VARCHAR2(50 CHAR), -- DELIVERY, DAMAGE, INSPECTION, ADMINISTRATIVE
@@ -520,14 +387,14 @@ CREATE TABLE cemtezgelen.documents (
   provisionerseq       NUMBER,
   CONSTRAINT documents_seq_pk PRIMARY KEY (seq),
   CONSTRAINT documents_stopseq_fk FOREIGN KEY (stopseq) REFERENCES cemtezgelen.stops(seq),
-  CONSTRAINT documents_stopassetseq_fk FOREIGN KEY (stopassetseq) REFERENCES cemtezgelen.stopassets(seq),
+  CONSTRAINT documents_assetseq_fk FOREIGN KEY (assetseq) REFERENCES cemtezgelen.assets(seq),
   CONSTRAINT documents_nonconformity_fk FOREIGN KEY (nonconformityseq) REFERENCES cemtezgelen.nonconformities(seq),
   CONSTRAINT documents_doctype_ck CHECK (documenttype IN ('PHOTO', 'SIGNATURE', 'POD', 'DAMAGE_PHOTO', 'INSPECTION_PHOTO', 'SEAL_PHOTO', 'CMR', 'INVOICE', 'OTHER')),
   CONSTRAINT documents_doccat_ck CHECK (documentcategory IN ('DELIVERY', 'DAMAGE', 'INSPECTION', 'ADMINISTRATIVE')),
   CONSTRAINT documents_isverified_ck CHECK (isverified IN ('Y', 'N')),
   CONSTRAINT documents_aichecked_ck CHECK (aichecked IN ('Y', 'N')),
   CONSTRAINT documents_verifstatus_ck CHECK (verificationstatus IN ('NOT_VERIFIED', 'PASSED', 'FAILED', 'PENDING')),
-  CONSTRAINT documents_parent_ck CHECK (stopseq IS NOT NULL OR stopassetseq IS NOT NULL OR nonconformityseq IS NOT NULL)
+  CONSTRAINT documents_parent_ck CHECK (stopseq IS NOT NULL OR assetseq IS NOT NULL OR nonconformityseq IS NOT NULL)
 );
 
 COMMENT ON TABLE cemtezgelen.documents IS 'Hackathon - Documents/photos with verification and AI check tracking';
@@ -537,7 +404,7 @@ COMMENT ON COLUMN cemtezgelen.documents.aichecked IS 'AI processed flag: Y=Yes, 
 
 CREATE INDEX cemtezgelen.idx_documents_1 ON cemtezgelen.documents(provisionerseq);
 CREATE INDEX cemtezgelen.idx_documents_2 ON cemtezgelen.documents(stopseq);
-CREATE INDEX cemtezgelen.idx_documents_3 ON cemtezgelen.documents(stopassetseq);
+CREATE INDEX cemtezgelen.idx_documents_3 ON cemtezgelen.documents(assetseq);
 CREATE INDEX cemtezgelen.idx_documents_4 ON cemtezgelen.documents(nonconformityseq);
 CREATE INDEX cemtezgelen.idx_documents_5 ON cemtezgelen.documents(uploaddate);
 CREATE INDEX cemtezgelen.idx_documents_6 ON cemtezgelen.documents(documenttype);
@@ -573,14 +440,14 @@ END;
 /
 
 -- =============================================================================
--- 8. AI_CHECKS TABLE (AI Kontrolleri)
+-- 6. AI_CHECKS TABLE (AI Kontrolleri)
 -- =============================================================================
 CREATE SEQUENCE cemtezgelen.aichecks_seq START WITH 1 INCREMENT BY 1 NOCACHE;
 
 CREATE TABLE cemtezgelen.aichecks (
   seq                  NUMBER,
   stopseq              NUMBER,
-  stopassetseq         NUMBER,
+  assetseq             NUMBER,
   nonconformityseq     NUMBER,
   documentseq          NUMBER,
   checknumber          VARCHAR2(50 CHAR),
@@ -607,7 +474,7 @@ CREATE TABLE cemtezgelen.aichecks (
   provisionerseq       NUMBER,
   CONSTRAINT aichecks_seq_pk PRIMARY KEY (seq),
   CONSTRAINT aichecks_stopseq_fk FOREIGN KEY (stopseq) REFERENCES cemtezgelen.stops(seq),
-  CONSTRAINT aichecks_stopassetseq_fk FOREIGN KEY (stopassetseq) REFERENCES cemtezgelen.stopassets(seq),
+  CONSTRAINT aichecks_assetseq_fk FOREIGN KEY (assetseq) REFERENCES cemtezgelen.assets(seq),
   CONSTRAINT aichecks_nonconformity_fk FOREIGN KEY (nonconformityseq) REFERENCES cemtezgelen.nonconformities(seq),
   CONSTRAINT aichecks_documentseq_fk FOREIGN KEY (documentseq) REFERENCES cemtezgelen.documents(seq),
   CONSTRAINT aichecks_checknumber_uk UNIQUE (checknumber, provisionerseq),
@@ -622,7 +489,7 @@ COMMENT ON COLUMN cemtezgelen.aichecks.processingtime IS 'AI processing time in 
 
 CREATE INDEX cemtezgelen.idx_aichecks_1 ON cemtezgelen.aichecks(provisionerseq, status);
 CREATE INDEX cemtezgelen.idx_aichecks_2 ON cemtezgelen.aichecks(stopseq);
-CREATE INDEX cemtezgelen.idx_aichecks_3 ON cemtezgelen.aichecks(stopassetseq);
+CREATE INDEX cemtezgelen.idx_aichecks_3 ON cemtezgelen.aichecks(assetseq);
 CREATE INDEX cemtezgelen.idx_aichecks_4 ON cemtezgelen.aichecks(nonconformityseq);
 CREATE INDEX cemtezgelen.idx_aichecks_5 ON cemtezgelen.aichecks(documentseq);
 CREATE INDEX cemtezgelen.idx_aichecks_6 ON cemtezgelen.aichecks(checkdate);
@@ -663,7 +530,7 @@ END;
 /
 
 -- =============================================================================
--- 9. NOTIFICATIONS TABLE (Bildirimler)
+-- 7. NOTIFICATIONS TABLE (Bildirimler)
 -- =============================================================================
 CREATE SEQUENCE cemtezgelen.notifications_seq START WITH 1 INCREMENT BY 1 NOCACHE;
 
@@ -847,30 +714,30 @@ DOCUMENTS.metadata JSON Example:
 -- =============================================================================
 -- Summary
 -- =============================================================================
--- Tables: 9
---   1. ORDERS (detailed customer and delivery info)
---   2. TRIPS (detailed driver and vehicle tracking)
---   3. STOPS (GPS coordinates, timing, instructions)
---   4. ASSETS (containers & trailers with full specs)
---   5. STOP_ASSETS (delivery and inspection tracking)
---   6. NONCONFORMITIES (main table for all non-conformities)
---   7. DOCUMENTS (multi-purpose with verification)
---   8. AI_CHECKS (detailed AI analysis with performance metrics)
---   9. NOTIFICATIONS (multi-channel delivery tracking)
+-- Tables: 7
+--   1. TRIPS (detailed driver and vehicle tracking)
+--   2. STOPS (GPS coordinates, timing, instructions)
+--   3. ASSETS (containers & trailers with full specs, linked to stops)
+--   4. NONCONFORMITIES (main table for all non-conformities, linked to assets)
+--   5. DOCUMENTS (multi-purpose with verification)
+--   6. AI_CHECKS (detailed AI analysis with performance metrics)
+--   7. NOTIFICATIONS (multi-channel delivery tracking)
 --
--- Sequences: 9
--- Views: 9
--- Triggers: 9
--- Indexes: 46
+-- Sequences: 7
+-- Views: 7
+-- Triggers: 7
+-- Indexes: 40+
 -- 
--- Key Changes from v1.0:
---   - Non-conformities moved to separate main table (NONCONFORMITIES)
---   - GOODS replaced with ASSETS (supports CONTAINER and TRAILER types)
---   - All tables enhanced with detailed columns
---   - Better tracking for inspections, verifications, and AI checks
---   - Multi-channel notification support
---   - Performance metrics for AI processing
+-- Data Model: TRIPS -> STOPS -> ASSETS -> NONCONFORMITIES
+-- 
+-- Key Changes from v2.0:
+--   - Removed ORDERS table (simplified model)
+--   - Removed STOPASSETS table (assets directly linked to stops)
+--   - ASSETS now linked to STOPS (each stop can have one or more assets)
+--   - NONCONFORMITIES linked to ASSETS (not STOPASSETS)
+--   - DOCUMENTS and AI_CHECKS updated to reference ASSETS directly
+--   - Simplified relationship chain: TRIPS -> STOPS -> ASSETS -> NONCONFORMITIES
 --
--- AI generated code END - 2025-12-19 14:45
+-- AI generated code END - 2025-12-19 16:00
 -- =============================================================================
 
