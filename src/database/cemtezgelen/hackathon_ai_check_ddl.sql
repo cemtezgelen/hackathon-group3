@@ -509,6 +509,7 @@ CREATE TABLE cemtezgelen.documents (
   verificationstatus   VARCHAR2(20 CHAR), -- NOT_VERIFIED, PASSED, FAILED, PENDING
   aichecked            VARCHAR2(1 CHAR) DEFAULT 'N',
   metadata             CLOB, -- JSON format for additional metadata
+  blobcontent          BLOB,
   -- Audit columns
   createdate           TIMESTAMP(6) WITH LOCAL TIME ZONE DEFAULT ON NULL CURRENT_TIMESTAMP,
   createuser           VARCHAR2(200 CHAR),
